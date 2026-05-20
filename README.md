@@ -1,17 +1,22 @@
-# Socket Security Visual Studio Code Extension
+# Socket Security Zed Extension
 
-This extension provides automatic reporting of security concerns from [Socket Security](https://socket.dev). The features of this extension aim to provide guidance through all stages of development.
+This extension exposes the hosted Socket Security MCP server to Zed's Agent Panel.
 
-## Ahead of Package Installation
+## Features
 
-- Package imports in JavaScript and Python are detected and given summary scores to show concerns with configurable overlays. These overlays will persist even after package installation.
+- Registers a Socket Security context server in Zed.
+- Bridges Zed's stdio MCP extension interface to `https://mcp.socket.dev/` with `mcp-remote`.
 
-- Socket detects multiple alternate forms of package imports, including dynamic `import()` or `require` in JavaScript or `importlib.import_module` in Python.
+## Development
 
-## MCP Server
+Install Rust with `rustup`, then install the repository as a dev extension from Zed with `zed: install dev extension`.
 
-- This will automatically register the socket MCP server at https://mcp.socket.dev to allow usage of the public MCP server.
+```bash
+RUSTC="$(rustup which rustc --toolchain stable)" rustup run stable cargo build --target wasm32-wasip1 --release
+```
 
-# Team Guide
+## Migration Notes
 
-If you are in charge of a team you may wish to setup this up as a recommended extension or other organization level settings. Please refer to our docs.
+The previous VS Code extension also rendered inline package decorations, hover cards, a login command, a status bar item, and editor configuration. Zed's current extension API supports languages, debuggers, themes, icon themes, snippets, and MCP servers, so those VS Code-specific features do not have a Zed extension surface yet.
+
+The TypeScript implementation remains in `src/` as migration reference code. The active Zed extension entry point is `src/lib.rs`.

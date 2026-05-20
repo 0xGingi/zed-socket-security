@@ -1,0 +1,10 @@
+id = "socket-security"
+name = "Socket Security"
+description = "Socket Security MCP server integration"
+version = "2.0.3"
+schema_version = 1
+authors = ["Socket Security <support@socket.dev>"]
+repository = "https://github.com/SocketDev/zed-socket-security"
+
+[context_servers.socket-security]
+name = "Socket Security"
