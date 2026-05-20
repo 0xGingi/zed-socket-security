@@ -35,7 +35,11 @@ Restart Zed after installing so it reloads the extension index. This path instal
 
 ## Configuration
 
-The language server reads Socket credentials from `SOCKET_API_TOKEN`. The legacy aliases `SOCKET_API_KEY`, `SOCKET_SECURITY_API_TOKEN`, and `SOCKET_SECURITY_API_KEY` are also accepted for one-cycle compatibility.
+Open the extension in Zed's Extensions view and choose Configure. Enter your Socket API token in `socket_api_token`.
+
+The setting is stored under `context_servers.socket-security.settings.socket_api_token` in Zed settings. Package diagnostics also read that value, so the same token powers both the MCP server and LSP package analysis.
+
+The language server still accepts `SOCKET_API_TOKEN` from the process environment. The legacy aliases `api_token`, `SOCKET_API_KEY`, `SOCKET_SECURITY_API_TOKEN`, and `SOCKET_SECURITY_API_KEY` are also accepted for one-cycle compatibility.
 
 ## Migration Notes
 

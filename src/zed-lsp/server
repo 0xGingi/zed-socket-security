@@ -5,6 +5,7 @@ const { contains, findRefs } = require('./scanner')
 const documents = new Map()
 const purlCache = new Map()
 const pendingPurls = new Set()
+let serverSettings = {}
 let queueFlushTimer
 let input = Buffer.alloc(0)
 
@@ -37,6 +38,10 @@ process.stdin.on('data', chunk => {
 
 async function handleMessage(message) {
   if (message.method === 'initialize') {
+    serverSettings = mergeSettings(
+      serverSettings,
+      message.params?.initializationOptions,
+    )
     respond(message.id, {
       capabilities: {
         hoverProvider: true,
@@ -47,6 +52,14 @@ async function handleMessage(message) {
         version: '2.0.3',
       },
     })
+    return
+  }
+  if (message.method === 'workspace/didChangeConfiguration') {
+    serverSettings = mergeSettings(serverSettings, message.params?.settings)
+    purlCache.clear()
+    for (const doc of documents.values()) {
+      await analyze(doc.uri)
+    }
     return
   }
   if (message.method === 'shutdown') {
@@ -277,6 +290,7 @@ async function fetchPurls() {
     'content-type': 'application/json',
   }
   const token =
+    configuredToken() ??
     process.env.SOCKET_API_TOKEN ??
     process.env.SOCKET_API_KEY ??
     process.env.SOCKET_SECURITY_API_TOKEN ??
@@ -339,6 +353,86 @@ async function fetchPurls() {
       })
     }
   }
+}
+
+function configuredToken() {
+  for (const settings of [serverSettings, userSettings(), projectSettings()]) {
+    const token =
+      settings?.socket_api_token ??
+      settings?.api_token ??
+      settings?.context_servers?.['socket-security']?.settings?.socket_api_token ??
+      settings?.context_servers?.['socket-security']?.settings?.api_token
+    if (typeof token === 'string' && token.trim()) {
+      return token.trim()
+    }
+  }
+  return undefined
+}
+
+function mergeSettings(current, next) {
+  if (!next || typeof next !== 'object') {
+    return current
+  }
+  return {
+    ...current,
+    ...next,
+  }
+}
+
+function projectSettings() {
+  const doc = documents.values().next().value
+  if (!doc?.uri?.startsWith('file://')) {
+    return undefined
+  }
+  try {
+    const filePath = decodeURIComponent(new URL(doc.uri).pathname)
+    const segments = filePath.split('/').filter(Boolean)
+    for (let i = segments.length - 1; i >= 0; i -= 1) {
+      const candidate = `/${segments.slice(0, i).join('/')}/.zed/settings.json`
+      if (require('node:fs').existsSync(candidate)) {
+        return readJsonc(candidate)
+      }
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+function userSettings() {
+  const home = require('node:os').homedir()
+  const paths = [
+    process.env.XDG_CONFIG_HOME
+      ? `${process.env.XDG_CONFIG_HOME}/zed/settings.json`
+      : `${home}/.config/zed/settings.json`,
+    `${home}/Library/Application Support/Zed/settings.json`,
+  ]
+  for (let i = 0, { length } = paths; i < length; i += 1) {
+    const settings = readJsonc(paths[i])
+    if (settings) {
+      return settings
+    }
+  }
+  return undefined
+}
+
+function readJsonc(filePath) {
+  try {
+    const fs = require('node:fs')
+    if (!fs.existsSync(filePath)) {
+      return undefined
+    }
+    return JSON.parse(stripJsonComments(fs.readFileSync(filePath, 'utf8')))
+  } catch {
+    return undefined
+  }
+}
+
+function stripJsonComments(text) {
+  return text
+    .replaceAll(/\/\*[\s\S]*?\*\//g, '')
+    .replaceAll(/(^|[^:])\/\/.*$/gm, '$1')
+    .replaceAll(/,\s*([}\]])/g, '$1')
 }
 
 function respond(id, result) {
