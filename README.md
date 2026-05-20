@@ -17,6 +17,22 @@ Install Rust with `rustup`, then install the repository as a dev extension from 
 RUSTC="$(rustup which rustc --toolchain stable)" rustup run stable cargo build --target wasm32-wasip1 --release
 ```
 
+## Packaging
+
+Build a non-dev Zed extension archive and manifest:
+
+```bash
+node zed-package
+```
+
+Install the precompiled extension into Zed's normal extension directory:
+
+```bash
+node zed-package --install
+```
+
+Restart Zed after installing so it reloads the extension index. This path installs `extension.wasm` directly and does not rely on Zed compiling the Rust extension.
+
 ## Configuration
 
 The language server reads Socket credentials from `SOCKET_API_TOKEN`. The legacy aliases `SOCKET_API_KEY`, `SOCKET_SECURITY_API_TOKEN`, and `SOCKET_SECURITY_API_KEY` are also accepted for one-cycle compatibility.

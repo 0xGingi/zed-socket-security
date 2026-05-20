@@ -1,0 +1,236 @@
+#!/usr/bin/env node
+
+const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const root = __dirname
+const extensionId = 'socket-security'
+const zedApiVersion = '0.7.0'
+const buildDir = path.join(root, 'build', 'zed')
+const packageDir = path.join(buildDir, 'package')
+const distDir = path.join(buildDir, 'dist')
+const archivePath = path.join(distDir, 'archive.tar.gz')
+const manifestJsonPath = path.join(distDir, 'manifest.json')
+const extensionTomlPath = path.join(root, 'extension.toml')
+const cargoTomlPath = path.join(root, 'Cargo.toml')
+const releaseWasmPath = path.join(
+  root,
+  'target',
+  'wasm32-wasip1',
+  'release',
+  'socket_security.wasm',
+)
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd || root,
+    env: options.env,
+    stdio: 'inherit',
+  })
+  if (result.error) {
+    throw result.error
+  }
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(' ')} failed with status ${result.status}`)
+  }
+}
+
+function output(command, args) {
+  const result = spawnSync(command, args, {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (result.error) {
+    throw result.error
+  }
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(' ')} failed with status ${result.status}`)
+  }
+  return result.stdout.trim()
+}
+
+function readExtensionToml() {
+  const toml = fs.readFileSync(extensionTomlPath, 'utf8')
+  const stringValue = key => {
+    const match = toml.match(new RegExp(`^${key} = "([^"]+)"`, 'm'))
+    if (!match) {
+      throw new Error(`${extensionTomlPath}: missing ${key}`)
+    }
+    return match[1]
+  }
+  const rawValue = key => {
+    const match = toml.match(new RegExp(`^${key} = (.+)$`, 'm'))
+    if (!match) {
+      throw new Error(`${extensionTomlPath}: missing ${key}`)
+    }
+    return match[1].trim().replace(/^"|"$/g, '')
+  }
+  const authorsMatch = toml.match(/^authors = \[(.+)\]$/m)
+  const authors = authorsMatch
+    ? [...authorsMatch[1].matchAll(/"([^"]+)"/g)].map(match => match[1])
+    : []
+  if (authors.length === 0) {
+    throw new Error(`${extensionTomlPath}: authors must contain at least one author`)
+  }
+  return {
+    authors,
+    description: stringValue('description'),
+    id: stringValue('id'),
+    name: stringValue('name'),
+    repository: stringValue('repository'),
+    schemaVersion: Number(rawValue('schema_version')),
+    version: stringValue('version'),
+  }
+}
+
+function zedExtensionsDir() {
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'Zed', 'extensions')
+  }
+  if (process.platform === 'linux') {
+    return path.join(
+      process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'),
+      'zed',
+      'extensions',
+    )
+  }
+  if (process.platform === 'win32') {
+    if (!process.env.LOCALAPPDATA) {
+      throw new Error('LOCALAPPDATA is required to resolve the Zed extensions directory')
+    }
+    return path.join(process.env.LOCALAPPDATA, 'Zed', 'extensions')
+  }
+  throw new Error(`unsupported platform: ${process.platform}`)
+}
+
+function buildWasm() {
+  const rustc = output('rustup', ['which', 'rustc', '--toolchain', 'stable'])
+  run('rustup', ['target', 'add', 'wasm32-wasip1', '--toolchain', 'stable'])
+  run('rustup', ['run', 'stable', 'cargo', 'build', '--target', 'wasm32-wasip1', '--release'], {
+    env: {
+      ...process.env,
+      RUSTC: rustc,
+    },
+  })
+  if (!fs.existsSync(releaseWasmPath)) {
+    throw new Error(`${releaseWasmPath} was not created`)
+  }
+}
+
+function packageExtension(manifest) {
+  fs.rmSync(packageDir, { recursive: true, force: true })
+  fs.rmSync(distDir, { recursive: true, force: true })
+  fs.mkdirSync(path.join(packageDir, 'src', 'zed-lsp'), { recursive: true })
+  fs.mkdirSync(distDir, { recursive: true })
+  fs.copyFileSync(releaseWasmPath, path.join(packageDir, 'extension.wasm'))
+  fs.copyFileSync(extensionTomlPath, path.join(packageDir, 'extension.toml'))
+  fs.copyFileSync(cargoTomlPath, path.join(packageDir, 'Cargo.toml'))
+  fs.cpSync(path.join(root, 'src', 'zed-lsp'), path.join(packageDir, 'src', 'zed-lsp'), {
+    recursive: true,
+  })
+  fs.appendFileSync(
+    path.join(packageDir, 'extension.toml'),
+    `\n[lib]\nkind = "Rust"\nversion = "${zedApiVersion}"\n`,
+  )
+  fs.writeFileSync(
+    manifestJsonPath,
+    `${JSON.stringify(
+      {
+        name: manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        authors: manifest.authors,
+        repository: manifest.repository,
+        schema_version: manifest.schemaVersion,
+        wasm_api_version: zedApiVersion,
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  run('tar', ['-czf', archivePath, '-C', packageDir, '.'])
+}
+
+function installExtension(manifest) {
+  if (manifest.id !== extensionId) {
+    throw new Error(`${extensionTomlPath}: id must be ${extensionId}; saw ${manifest.id}`)
+  }
+  const extensionsDir = zedExtensionsDir()
+  const installedDir = path.join(extensionsDir, 'installed', extensionId)
+  const workDir = path.join(extensionsDir, 'work', extensionId)
+  fs.mkdirSync(path.dirname(installedDir), { recursive: true })
+  fs.mkdirSync(workDir, { recursive: true })
+  fs.rmSync(installedDir, { recursive: true, force: true })
+  fs.cpSync(packageDir, installedDir, { recursive: true })
+  const indexPath = path.join(extensionsDir, 'index.json')
+  const index = fs.existsSync(indexPath)
+    ? JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+    : { extensions: {} }
+  index.extensions = index.extensions || {}
+  index.extensions[extensionId] = {
+    manifest: {
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      schema_version: manifest.schemaVersion,
+      description: manifest.description,
+      repository: manifest.repository,
+      authors: manifest.authors,
+      lib: {
+        kind: 'Rust',
+        version: zedApiVersion,
+      },
+      themes: [],
+      icon_themes: [],
+      languages: [],
+      grammars: {},
+      language_servers: {
+        'socket-security-lsp': {
+          language: null,
+          languages: ['JavaScript', 'TypeScript', 'TSX', 'JSON', 'JSONC', 'Python', 'Go', 'TOML', 'YAML'],
+          language_ids: {
+            Go: 'go',
+            JavaScript: 'javascript',
+            JSON: 'json',
+            JSONC: 'jsonc',
+            Python: 'python',
+            TOML: 'toml',
+            TSX: 'typescriptreact',
+            TypeScript: 'typescript',
+            YAML: 'yaml',
+          },
+          code_action_kinds: null,
+        },
+      },
+      context_servers: {
+        'socket-security': {},
+      },
+      agent_servers: {},
+      slash_commands: {},
+      snippets: null,
+      capabilities: [],
+    },
+    dev: false,
+  }
+  fs.mkdirSync(extensionsDir, { recursive: true })
+  fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`)
+  console.log(`installed ${extensionId} to ${installedDir}`)
+}
+
+try {
+  const install = process.argv.includes('--install')
+  const manifest = readExtensionToml()
+  buildWasm()
+  packageExtension(manifest)
+  if (install) {
+    installExtension(manifest)
+  }
+  console.log(`wrote ${archivePath}`)
+  console.log(`wrote ${manifestJsonPath}`)
+} catch (error) {
+  console.error(error && error.message ? error.message : String(error))
+  process.exit(1)
+}
