@@ -31,7 +31,7 @@ Install the precompiled extension into Zed's normal extension directory:
 node zed-package --install
 ```
 
-Restart Zed after installing so it reloads the extension index. This path installs `extension.wasm` directly and does not rely on Zed compiling the Rust extension.
+Restart Zed after installing so it reloads the extension index. This path installs `extension.wasm` directly and does not rely on Zed compiling the Rust extension. Zed shows local non-registry extensions in the dev/local section of the Extensions view; the Rebuild button is not needed after this install path.
 
 ## Configuration
 

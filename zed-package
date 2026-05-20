@@ -164,7 +164,7 @@ function installExtension(manifest) {
   fs.mkdirSync(path.dirname(installedDir), { recursive: true })
   fs.mkdirSync(workDir, { recursive: true })
   fs.rmSync(installedDir, { recursive: true, force: true })
-  fs.cpSync(packageDir, installedDir, { recursive: true })
+  fs.symlinkSync(packageDir, installedDir, 'dir')
   const indexPath = path.join(extensionsDir, 'index.json')
   const index = fs.existsSync(indexPath)
     ? JSON.parse(fs.readFileSync(indexPath, 'utf8'))
@@ -213,7 +213,7 @@ function installExtension(manifest) {
       snippets: null,
       capabilities: [],
     },
-    dev: false,
+    dev: true,
   }
   fs.mkdirSync(extensionsDir, { recursive: true })
   fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`)
