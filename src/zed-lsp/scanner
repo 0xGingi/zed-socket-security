@@ -1,0 +1,279 @@
+function contains(range, position) {
+  if (position.line < range.start.line || position.line > range.end.line) {
+    return false
+  }
+  if (
+    position.line === range.start.line &&
+    position.character < range.start.character
+  ) {
+    return false
+  }
+  return (
+    position.line !== range.end.line ||
+    position.character <= range.end.character
+  )
+}
+
+function findRefs(doc) {
+  const pathname = decodeURIComponent(new URL(doc.uri).pathname)
+  const filename = pathname.split('/').pop() ?? ''
+  if (filename === 'package.json') {
+    return packageJsonRefs(doc.text)
+  }
+  if (
+    filename === 'requirements.txt' ||
+    filename.endsWith('-requirements.txt')
+  ) {
+    return requirementsRefs(doc.text)
+  }
+  if (filename === 'pyproject.toml') {
+    return pyprojectRefs(doc.text)
+  }
+  if (filename === 'go.mod') {
+    return goModRefs(doc.text)
+  }
+  if (
+    doc.languageId === 'javascript' ||
+    doc.languageId === 'javascriptreact' ||
+    doc.languageId === 'typescript' ||
+    doc.languageId === 'typescriptreact'
+  ) {
+    return jsRefs(doc.text)
+  }
+  if (doc.languageId === 'python') {
+    return pythonRefs(doc.text)
+  }
+  if (doc.languageId === 'go') {
+    return goRefs(doc.text)
+  }
+  return []
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function goModRefs(text) {
+  return regexRefs(
+    text,
+    /^\s*(?:require\s+)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+)\s+v\d/gm,
+    'golang',
+    name => name,
+  )
+}
+
+function goRefs(text) {
+  return regexRefs(
+    text,
+    /import\s+(?:\(\s*)?["`]([^"`]+)["`]/g,
+    'golang',
+    name => name,
+  )
+}
+
+function isLocal(name) {
+  return name.startsWith('.') || name.startsWith('/') || name.startsWith('#')
+}
+
+function jsRefs(text) {
+  return regexRefs(
+    text,
+    /\b(?:export\s+[^'"]+\s+from\s+|import\s+(?:[^'"]+\s+from\s+)?|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g,
+    'npm',
+    npmPackageName,
+  )
+}
+
+function npmPackageName(name) {
+  return name.startsWith('@')
+    ? name.split('/').slice(0, 2).join('/')
+    : name.split('/')[0]
+}
+
+function packageJsonRefs(text) {
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return []
+  }
+  const fields = [
+    'bundledDependencies',
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+  ]
+  const names = new Set()
+  for (let i = 0, { length } = fields; i < length; i += 1) {
+    const value = parsed[fields[i]]
+    if (Array.isArray(value)) {
+      for (
+        let j = 0, { length: valueLength } = value;
+        j < valueLength;
+        j += 1
+      ) {
+        if (typeof value[j] === 'string') {
+          names.add(value[j])
+        }
+      }
+    } else if (value && typeof value === 'object') {
+      for (const name of Object.keys(value)) {
+        names.add(name)
+      }
+    }
+  }
+  const refs = []
+  for (const name of names) {
+    refs.push(...quotedRefs(text, name, simpurl('npm', npmPackageName(name))))
+  }
+  return refs
+}
+
+function positionForOffset(text, offset) {
+  let line = 0
+  let character = 0
+  for (let i = 0; i < offset; i += 1) {
+    if (text.charCodeAt(i) === 10) {
+      line += 1
+      character = 0
+    } else {
+      character += 1
+    }
+  }
+  return { line, character }
+}
+
+function purlName(purl) {
+  return purl.replace(/^pkg:[^/]+\//, '')
+}
+
+function pyprojectRefs(text) {
+  return regexRefs(
+    text,
+    /["']([A-Z0-9][A-Z0-9._-]*[A-Z0-9])(?:[ !<=>@\[|~;][^"']*)?["']/gim,
+    'pypi',
+    name => name,
+  )
+}
+
+function pythonRefs(text) {
+  const refs = regexRefs(
+    text,
+    /^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([A-Za-z_][\w.]*))/gm,
+    'pypi',
+    name => name.split('.')[0],
+  )
+  return refs.filter(ref => !PYTHON_BUILTINS.has(purlName(ref.purl)))
+}
+
+function quotedRefs(text, name, purl) {
+  const refs = []
+  const regex = new RegExp(`["']${escapeRegExp(name)}["']`, 'g')
+  for (const match of text.matchAll(regex)) {
+    const start = match.index + 1
+    refs.push({
+      purl,
+      range: rangeForOffsets(text, start, start + name.length),
+    })
+  }
+  return refs
+}
+
+function rangeForOffsets(text, startOffset, endOffset) {
+  return {
+    start: positionForOffset(text, startOffset),
+    end: positionForOffset(text, endOffset),
+  }
+}
+
+function regexRefs(text, regex, ecosystem, normalize) {
+  const refs = []
+  for (const match of text.matchAll(regex)) {
+    const raw = match[1] ?? match[2]
+    if (!raw || isLocal(raw) || NODE_BUILTINS.has(raw)) {
+      continue
+    }
+    const name = normalize(raw)
+    const start = match.index + match[0].indexOf(raw)
+    refs.push({
+      purl: simpurl(ecosystem, name),
+      range: rangeForOffsets(text, start, start + raw.length),
+    })
+  }
+  return refs
+}
+
+function requirementsRefs(text) {
+  return regexRefs(
+    text,
+    /^([A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])(?=<|!|>|~|=|@|\(|\[|;|\s|$)/gim,
+    'pypi',
+    name => name,
+  )
+}
+
+function simpurl(ecosystem, name) {
+  return `pkg:${ecosystem}/${name}`
+}
+
+const NODE_BUILTINS = new Set([
+  'assert',
+  'buffer',
+  'child_process',
+  'crypto',
+  'events',
+  'fs',
+  'http',
+  'https',
+  'module',
+  'node:assert',
+  'node:buffer',
+  'node:child_process',
+  'node:crypto',
+  'node:events',
+  'node:fs',
+  'node:http',
+  'node:https',
+  'node:module',
+  'node:os',
+  'node:path',
+  'node:process',
+  'node:stream',
+  'node:url',
+  'node:util',
+  'os',
+  'path',
+  'process',
+  'stream',
+  'url',
+  'util',
+])
+
+const PYTHON_BUILTINS = new Set([
+  'argparse',
+  'asyncio',
+  'collections',
+  'contextlib',
+  'dataclasses',
+  'datetime',
+  'functools',
+  'hashlib',
+  'importlib',
+  'itertools',
+  'json',
+  'logging',
+  'math',
+  'os',
+  'pathlib',
+  're',
+  'subprocess',
+  'sys',
+  'typing',
+  'unittest',
+])
+
+module.exports = {
+  contains,
+  findRefs,
+}

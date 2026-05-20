@@ -1,0 +1,369 @@
+#!/usr/bin/env node
+
+const { contains, findRefs } = require('./scanner')
+
+const documents = new Map()
+const purlCache = new Map()
+const pendingPurls = new Set()
+let queueFlushTimer
+let input = Buffer.alloc(0)
+
+process.stdin.on('data', chunk => {
+  input = Buffer.concat([input, chunk])
+  for (;;) {
+    const headerEnd = input.indexOf('\r\n\r\n')
+    if (headerEnd < 0) {
+      return
+    }
+    const header = input.subarray(0, headerEnd).toString('utf8')
+    const contentLengthMatch = /^Content-Length: (\d+)$/im.exec(header)
+    if (!contentLengthMatch) {
+      input = input.subarray(headerEnd + 4)
+      continue
+    }
+    const length = Number(contentLengthMatch[1])
+    const bodyStart = headerEnd + 4
+    const bodyEnd = bodyStart + length
+    if (input.length < bodyEnd) {
+      return
+    }
+    const body = input.subarray(bodyStart, bodyEnd).toString('utf8')
+    input = input.subarray(bodyEnd)
+    handleMessage(JSON.parse(body)).catch(err =>
+      log(`handler error: ${err.stack ?? err}`),
+    )
+  }
+})
+
+async function handleMessage(message) {
+  if (message.method === 'initialize') {
+    respond(message.id, {
+      capabilities: {
+        hoverProvider: true,
+        textDocumentSync: 1,
+      },
+      serverInfo: {
+        name: 'Socket Security',
+        version: '2.0.3',
+      },
+    })
+    return
+  }
+  if (message.method === 'shutdown') {
+    respond(message.id, null)
+    return
+  }
+  if (message.method === 'textDocument/didOpen') {
+    const doc = message.params.textDocument
+    documents.set(doc.uri, {
+      uri: doc.uri,
+      languageId: doc.languageId,
+      version: doc.version,
+      text: doc.text,
+      refs: [],
+    })
+    await analyze(doc.uri)
+    return
+  }
+  if (message.method === 'textDocument/didChange') {
+    const uri = message.params.textDocument.uri
+    const doc = documents.get(uri)
+    if (!doc) {
+      return
+    }
+    const change = message.params.contentChanges.at(-1)
+    if (!change || typeof change.text !== 'string') {
+      return
+    }
+    doc.text = change.text
+    doc.version = message.params.textDocument.version
+    await analyze(uri)
+    return
+  }
+  if (message.method === 'textDocument/didClose') {
+    const uri = message.params.textDocument.uri
+    documents.delete(uri)
+    notify('textDocument/publishDiagnostics', {
+      uri,
+      diagnostics: [],
+    })
+    return
+  }
+  if (message.method === 'textDocument/hover') {
+    respond(
+      message.id,
+      hover(message.params.textDocument.uri, message.params.position),
+    )
+  }
+}
+
+async function analyze(uri) {
+  const doc = documents.get(uri)
+  if (!doc) {
+    return
+  }
+  doc.refs = findRefs(doc)
+  for (let i = 0, { length } = doc.refs; i < length; i += 1) {
+    queuePurl(doc.refs[i].purl)
+  }
+  await flushPurlsSoon()
+  publishDiagnostics(doc)
+}
+
+function publishDiagnostics(doc) {
+  const diagnostics = []
+  for (let i = 0, { length } = doc.refs; i < length; i += 1) {
+    const ref = doc.refs[i]
+    const data = purlCache.get(ref.purl)
+    const packageData = data?.pkgData
+    if (!packageData) {
+      continue
+    }
+    const alerts = packageData.alerts ?? []
+    let severity = 4
+    const alertTypes = []
+    for (
+      let j = 0, { length: alertsLength } = alerts;
+      j < alertsLength;
+      j += 1
+    ) {
+      const alert = alerts[j]
+      if (alert.action === 'error') {
+        severity = 1
+      } else if (alert.action === 'warn' && severity > 2) {
+        severity = 2
+      } else if (alert.action === 'monitor' && severity > 3) {
+        severity = 3
+      }
+      if (!alertTypes.includes(alert.type)) {
+        alertTypes.push(alert.type)
+      }
+    }
+    if (alertTypes.length === 0) {
+      continue
+    }
+    const score = Math.round((packageData.score?.overall ?? 0) * 100)
+    diagnostics.push({
+      range: ref.range,
+      severity,
+      source: 'Socket Security',
+      code: ref.purl,
+      message: `Socket Security score ${score}: ${alertTypes.slice(0, 4).join(', ')}`,
+      data: {
+        purl: ref.purl,
+      },
+    })
+  }
+  notify('textDocument/publishDiagnostics', {
+    uri: doc.uri,
+    diagnostics,
+  })
+}
+
+function hover(uri, position) {
+  const doc = documents.get(uri)
+  if (!doc) {
+    return null
+  }
+  for (let i = 0, { length } = doc.refs; i < length; i += 1) {
+    const ref = doc.refs[i]
+    if (!contains(ref.range, position)) {
+      continue
+    }
+    return {
+      range: ref.range,
+      contents: {
+        kind: 'markdown',
+        value: hoverMarkdown(ref.purl),
+      },
+    }
+  }
+  return null
+}
+
+function hoverMarkdown(purl) {
+  const data = purlCache.get(purl)
+  if (!data) {
+    return `Socket Security for [${purl}](https://socket.dev/${purl})\n\nFetching package data.`
+  }
+  if (data.error) {
+    return `Socket Security for [${purl}](https://socket.dev/${purl})\n\n${data.error}`
+  }
+  const packageData = data.pkgData
+  if (!packageData) {
+    return `Socket Security for [${purl}](https://socket.dev/${purl})`
+  }
+  const score = Math.round((packageData.score?.overall ?? 0) * 100)
+  const link = packageLink(purl, packageData)
+  const rows = [
+    `Socket Security for [${packageData.name ?? purl}](${link})`,
+    '',
+    `Package score: ${score}`,
+  ]
+  const alerts = packageData.alerts ?? []
+  if (alerts.length > 0) {
+    rows.push('', '| action | type | extra |', '| --- | --- | --- |')
+    const seen = new Set()
+    for (let i = 0, { length } = alerts; i < length; i += 1) {
+      const alert = alerts[i]
+      if (seen.has(alert.type)) {
+        continue
+      }
+      seen.add(alert.type)
+      const extras = []
+      if (alert.props?.alternatePackage) {
+        extras.push(`Possible intent: ${alert.props.alternatePackage}`)
+      }
+      if (alert.props?.lastPublish) {
+        extras.push(
+          `Last published: ${new Date(alert.props.lastPublish).toLocaleDateString()}`,
+        )
+      }
+      if (alert.props?.note) {
+        extras.push(String(alert.props.note).replaceAll(/\r?\n/g, '<br>'))
+      }
+      rows.push(
+        `| ${alert.action} | ${alert.type} | ${extras.join('<br>') || ' '} |`,
+      )
+    }
+  }
+  return rows.join('\n')
+}
+
+function packageLink(purl, packageData) {
+  let type = packageData.type
+  let version = `/overview/${packageData.version ?? 'latest'}`
+  if (type === 'golang') {
+    type = 'go'
+    version = `?section=overview&version=${packageData.version ?? 'latest'}`
+  }
+  const namespace = packageData.namespace ? `${packageData.namespace}/` : ''
+  return `https://socket.dev/${type}/package/${namespace}${packageData.name}${version}`
+}
+
+function queuePurl(purl) {
+  if (!purlCache.has(purl)) {
+    purlCache.set(purl, {
+      pkgData: undefined,
+      error: undefined,
+    })
+  }
+  pendingPurls.add(purl)
+}
+
+function flushPurlsSoon() {
+  if (queueFlushTimer) {
+    return Promise.resolve()
+  }
+  return new Promise(resolve => {
+    queueFlushTimer = setTimeout(async () => {
+      queueFlushTimer = undefined
+      await fetchPurls()
+      for (const doc of documents.values()) {
+        publishDiagnostics(doc)
+      }
+      resolve()
+    }, 50)
+  })
+}
+
+async function fetchPurls() {
+  const purls = Array.from(pendingPurls)
+  pendingPurls.clear()
+  if (purls.length === 0) {
+    return
+  }
+  const headers = {
+    'content-type': 'application/json',
+  }
+  const token =
+    process.env.SOCKET_API_TOKEN ??
+    process.env.SOCKET_API_KEY ??
+    process.env.SOCKET_SECURITY_API_TOKEN ??
+    process.env.SOCKET_SECURITY_API_KEY
+  if (token) {
+    headers.authorization = `Bearer ${token}`
+  }
+  try {
+    const res = await fetch(
+      'https://api.socket.dev/v0/purl?alerts=true&compact=false',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          components: purls.map(purl => ({ purl })),
+        }),
+      },
+    )
+    if (!res.ok || !res.body) {
+      throw new Error(`Socket API returned ${res.status} ${res.statusText}`)
+    }
+    const found = new Set()
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let chunk = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      chunk += decoder.decode(value, { stream: true })
+      let newline
+      while ((newline = chunk.indexOf('\n')) >= 0) {
+        const line = chunk.slice(0, newline).trim()
+        chunk = chunk.slice(newline + 1)
+        if (!line) {
+          continue
+        }
+        const pkgData = JSON.parse(line)
+        found.add(pkgData.inputPurl)
+        purlCache.set(pkgData.inputPurl, {
+          pkgData,
+          error: undefined,
+        })
+      }
+    }
+    for (let i = 0, { length } = purls; i < length; i += 1) {
+      if (!found.has(purls[i])) {
+        purlCache.set(purls[i], {
+          pkgData: undefined,
+          error: 'Package data was not found in Socket.',
+        })
+      }
+    }
+  } catch (err) {
+    for (let i = 0, { length } = purls; i < length; i += 1) {
+      purlCache.set(purls[i], {
+        pkgData: undefined,
+        error: `Unable to load Socket package data: ${err.message}`,
+      })
+    }
+  }
+}
+
+function respond(id, result) {
+  send({
+    jsonrpc: '2.0',
+    id,
+    result,
+  })
+}
+
+function notify(method, params) {
+  send({
+    jsonrpc: '2.0',
+    method,
+    params,
+  })
+}
+
+function send(message) {
+  const body = JSON.stringify(message)
+  process.stdout.write(
+    `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`,
+  )
+}
+
+function log(message) {
+  process.stderr.write(`[socket-security-lsp] ${message}\n`)
+}

@@ -1,17 +1,39 @@
 use std::env;
-use zed_extension_api::{self as zed, Command, ContextServerId, Project, Result};
+use zed_extension_api::{
+    self as zed, Command, ContextServerId, LanguageServerId, Project, Result, Worktree,
+};
 
 const CONTEXT_SERVER_ID: &str = "socket-security";
+const LANGUAGE_SERVER_ID: &str = "socket-security-lsp";
 const MCP_REMOTE_PACKAGE: &str = "mcp-remote";
 const MCP_REMOTE_VERSION: &str = "0.1.38";
 const MCP_REMOTE_PATH: &str = "node_modules/mcp-remote/dist/proxy.js";
 const SOCKET_MCP_URL: &str = "https://mcp.socket.dev/";
+const SOCKET_LSP_PATH: &str = "src/zed-lsp/server";
 
 struct SocketSecurityExtension;
 
 impl zed::Extension for SocketSecurityExtension {
     fn new() -> Self {
         Self
+    }
+
+    fn language_server_command(
+        &mut self,
+        language_server_id: &LanguageServerId,
+        _worktree: &Worktree,
+    ) -> Result<Command> {
+        if language_server_id.as_ref() != LANGUAGE_SERVER_ID {
+            return Err(format!(
+                "Language server id must be `{LANGUAGE_SERVER_ID}`; saw `{language_server_id}`. Fix the language_servers entry in extension.toml.",
+            ));
+        }
+
+        Ok(Command {
+            command: zed::node_binary_path()?,
+            args: vec![extension_path(SOCKET_LSP_PATH)?],
+            env: Default::default(),
+        })
     }
 
     fn context_server_command(
@@ -30,22 +52,24 @@ impl zed::Extension for SocketSecurityExtension {
             zed::npm_install_package(MCP_REMOTE_PACKAGE, MCP_REMOTE_VERSION)?;
         }
 
-        let proxy_path = env::current_dir()
-            .map_err(|err| {
-                format!(
-                    "Current extension work directory must be readable; saw `{err}`. Reinstall the Socket Security extension in Zed.",
-                )
-            })?
-            .join(MCP_REMOTE_PATH)
-            .to_string_lossy()
-            .to_string();
-
         Ok(Command {
             command: zed::node_binary_path()?,
-            args: vec![proxy_path, SOCKET_MCP_URL.to_string()],
+            args: vec![extension_path(MCP_REMOTE_PATH)?, SOCKET_MCP_URL.to_string()],
             env: Default::default(),
         })
     }
+}
+
+fn extension_path(relative_path: &str) -> Result<String> {
+    Ok(env::current_dir()
+        .map_err(|err| {
+            format!(
+                "Current extension work directory must be readable; saw `{err}`. Reinstall the Socket Security extension in Zed.",
+            )
+        })?
+        .join(relative_path)
+        .to_string_lossy()
+        .to_string())
 }
 
 zed::register_extension!(SocketSecurityExtension);

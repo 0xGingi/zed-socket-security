@@ -8,3 +8,28 @@ repository = "https://github.com/SocketDev/zed-socket-security"
 
 [context_servers.socket-security]
 name = "Socket Security"
+
+[language_servers.socket-security-lsp]
+name = "Socket Security"
+languages = [
+  "JavaScript",
+  "TypeScript",
+  "TSX",
+  "JSON",
+  "JSONC",
+  "Python",
+  "Go",
+  "TOML",
+  "YAML",
+]
+
+[language_servers.socket-security-lsp.language_ids]
+"Go" = "go"
+"JavaScript" = "javascript"
+"JSON" = "json"
+"JSONC" = "jsonc"
+"Python" = "python"
+"TOML" = "toml"
+"TSX" = "typescriptreact"
+"TypeScript" = "typescript"
+"YAML" = "yaml"
