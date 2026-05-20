@@ -162,9 +162,13 @@ function installExtension(manifest) {
   const installedDir = path.join(extensionsDir, 'installed', extensionId)
   const workDir = path.join(extensionsDir, 'work', extensionId)
   fs.mkdirSync(path.dirname(installedDir), { recursive: true })
-  fs.mkdirSync(workDir, { recursive: true })
+  fs.rmSync(workDir, { recursive: true, force: true })
+  fs.mkdirSync(path.join(workDir, 'src', 'zed-lsp'), { recursive: true })
   fs.rmSync(installedDir, { recursive: true, force: true })
   fs.symlinkSync(packageDir, installedDir, 'dir')
+  fs.cpSync(path.join(packageDir, 'src', 'zed-lsp'), path.join(workDir, 'src', 'zed-lsp'), {
+    recursive: true,
+  })
   const indexPath = path.join(extensionsDir, 'index.json')
   const index = fs.existsSync(indexPath)
     ? JSON.parse(fs.readFileSync(indexPath, 'utf8'))

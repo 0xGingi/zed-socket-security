@@ -139,15 +139,30 @@ impl zed::Extension for SocketSecurityExtension {
 }
 
 fn extension_path(relative_path: &str) -> Result<String> {
-    Ok(env::current_dir()
-        .map_err(|err| {
-            format!(
-                "Current extension work directory must be readable; saw `{err}`. Reinstall the Socket Security extension in Zed.",
-            )
-        })?
-        .join(relative_path)
-        .to_string_lossy()
-        .to_string())
+    let work_dir = env::current_dir().map_err(|err| {
+        format!(
+            "Current extension work directory must be readable; saw `{err}`. Reinstall the Socket Security extension in Zed.",
+        )
+    })?;
+    let work_path = work_dir.join(relative_path);
+    if work_path.exists() {
+        return Ok(work_path.to_string_lossy().to_string());
+    }
+    let installed_path = work_dir
+        .parent()
+        .and_then(|extensions_dir| extensions_dir.parent())
+        .map(|extensions_dir| {
+            extensions_dir
+                .join("installed")
+                .join(CONTEXT_SERVER_ID)
+                .join(relative_path)
+        })
+        .filter(|path| path.exists());
+    if let Some(installed_path) = installed_path {
+        return Ok(installed_path.to_string_lossy().to_string());
+    }
+
+    Ok(work_path.to_string_lossy().to_string())
 }
 
 fn setting_token(settings: Option<&zed::serde_json::Value>) -> Option<String> {
