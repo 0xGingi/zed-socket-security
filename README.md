@@ -14,7 +14,7 @@ This extension exposes the hosted Socket Security MCP server to Zed's Agent Pane
 Install Rust with `rustup`, then install the repository as a dev extension from Zed with `zed: install dev extension`.
 
 ```bash
-RUSTC="$(rustup which rustc --toolchain stable)" rustup run stable cargo build --target wasm32-wasip1 --release
+RUSTC="$(rustup which rustc --toolchain stable)" rustup run stable cargo build --target wasm32-wasip2 --release
 ```
 
 ## Packaging

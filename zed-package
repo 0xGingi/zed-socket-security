@@ -18,7 +18,7 @@ const cargoTomlPath = path.join(root, 'Cargo.toml')
 const releaseWasmPath = path.join(
   root,
   'target',
-  'wasm32-wasip1',
+  'wasm32-wasip2',
   'release',
   'socket_security.wasm',
 )
@@ -108,8 +108,8 @@ function zedExtensionsDir() {
 
 function buildWasm() {
   const rustc = output('rustup', ['which', 'rustc', '--toolchain', 'stable'])
-  run('rustup', ['target', 'add', 'wasm32-wasip1', '--toolchain', 'stable'])
-  run('rustup', ['run', 'stable', 'cargo', 'build', '--target', 'wasm32-wasip1', '--release'], {
+  run('rustup', ['target', 'add', 'wasm32-wasip2', '--toolchain', 'stable'])
+  run('rustup', ['run', 'stable', 'cargo', 'build', '--target', 'wasm32-wasip2', '--release'], {
     env: {
       ...process.env,
       RUSTC: rustc,
