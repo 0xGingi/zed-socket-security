@@ -25,9 +25,9 @@ export default defineConfig({
     include: ['test/**/*.test.{js,ts,mjs,mts,cjs}'],
     exclude: [
       '**/node_modules/**',
+      '**/node_modules/.cache/**',
       '**/dist/**',
       '**/out/**',
-      '**/.cache/**',
       '**/.claude/**',
     ],
     reporters: ['default'],

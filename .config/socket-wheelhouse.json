@@ -1,7 +1,7 @@
 {
   "$schema": "./socket-wheelhouse-schema.json",
   "schemaVersion": 1,
-  "repoName": "socket-vscode",
+  "repoName": "zed-socket-security",
   "layout": "single-package",
   "native": "none",
   "hooks": {
@@ -26,11 +26,97 @@
     "profile": "standard"
   },
   "workflows": {
-    "ci": true,
+    "ci": false,
     "provenance": false,
     "requirePinnedFullSha": true,
     "weeklyUpdate": true
   },
+  "pathsAllowlist": [
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "ee0a7aa5c123",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "83195310d7ad",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "2be952ffdb0c",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "B",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "624a1cac953e",
+      "reason": "path-guard test fixture intentionally contains a violating cross-package path so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "517d47c6ce8e",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "1fba082cafac",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "50f74582717d",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "7250a3015db6",
+      "reason": "path-guard test fixture intentionally contains repeated violating path shapes so the scanner can assert they are reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "d793804960f2",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "71d37023e5c9",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "5dcd1de598c9",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "373cf063ce06",
+      "reason": "path-guard test fixture intentionally contains a violating path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "e87cb2c045fe",
+      "reason": "path-guard test fixture intentionally contains a violating template path shape so the scanner can assert it is reported."
+    },
+    {
+      "rule": "A",
+      "file": ".codex/hooks/path-guard/test/path-guard.test.mts",
+      "snippet_hash": "655d3741d1ca",
+      "reason": "path-guard test fixture intentionally contains a violating template path shape so the scanner can assert it is reported."
+    }
+  ],
   "claude": {
     "includeSecurityScanSkill": true,
     "includeSharedSkills": true,

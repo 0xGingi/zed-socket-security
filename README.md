@@ -66,9 +66,3 @@ After `node zed-package --install`, restart Zed and open a project containing on
 Hover a package name or import to see Socket package data. Packages with Socket alerts should also produce LSP diagnostics.
 
 To debug loading issues, run `zed: open log` and search for `socket-security`, `socket-security-lsp`, or `extension_host`.
-
-## Migration Notes
-
-The previous VS Code extension also rendered inline package decorations, hover cards, a login command, a status bar item, and editor configuration. Zed's current extension API supports languages, debuggers, themes, icon themes, snippets, and MCP servers, so those VS Code-specific features do not have a Zed extension surface yet.
-
-Package diagnostics and hovers are now provided through LSP, which is how Zed extensions can surface editor feedback. A Zed-native status bar login control and VS Code authentication-provider equivalent are still not available through the current extension API.
