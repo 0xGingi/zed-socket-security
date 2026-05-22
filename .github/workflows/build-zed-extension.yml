@@ -3,13 +3,12 @@ name: Build Zed Extension
 on:
   push:
     branches: [main]
-    tags: ['*']
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,11 +30,28 @@ jobs:
       - name: Build Zed extension package
         run: node zed-package
 
+      - name: Prepare release metadata
+        id: metadata
+        shell: bash
+        run: |
+          VERSION="$(node -e "const fs=require('fs'); const m=fs.readFileSync('extension.toml','utf8').match(/^version = \"([^\"]+)\"/m); if (!m) process.exit(1); process.stdout.write(m[1]);")"
+          TAG="zed-v${VERSION}-build.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          ARCHIVE="zed-socket-security-${VERSION}.tar.gz"
+          MANIFEST="zed-socket-security-${VERSION}-manifest.json"
+          cp build/zed/dist/archive.tar.gz "build/zed/dist/${ARCHIVE}"
+          cp build/zed/dist/manifest.json "build/zed/dist/${MANIFEST}"
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "manifest=${MANIFEST}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Verify package contents
         shell: bash
         run: |
           test -f build/zed/dist/archive.tar.gz
           test -f build/zed/dist/manifest.json
+          test -f "build/zed/dist/${{ steps.metadata.outputs.archive }}"
+          test -f "build/zed/dist/${{ steps.metadata.outputs.manifest }}"
           test -f build/zed/package/extension.wasm
           tar -tzf build/zed/dist/archive.tar.gz | sort
 
@@ -46,6 +62,21 @@ jobs:
           path: |
             build/zed/dist/archive.tar.gz
             build/zed/dist/manifest.json
+            build/zed/dist/${{ steps.metadata.outputs.archive }}
+            build/zed/dist/${{ steps.metadata.outputs.manifest }}
             build/zed/package/extension.wasm
           if-no-files-found: error
           retention-days: 14
+
+      - name: Create GitHub release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.metadata.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "Zed Socket Security ${{ steps.metadata.outputs.version }} build ${{ github.run_number }}" \
+            --notes "Precompiled Zed extension build for commit $GITHUB_SHA." \
+            "build/zed/dist/${{ steps.metadata.outputs.archive }}#archive.tar.gz" \
+            "build/zed/dist/${{ steps.metadata.outputs.manifest }}#manifest.json" \
+            "build/zed/package/extension.wasm#extension.wasm"
