@@ -132,36 +132,24 @@ function publishDiagnostics(doc) {
     if (!packageData) {
       continue
     }
-    const alerts = packageData.alerts ?? []
-    let severity = 4
-    const alertTypes = []
-    for (
-      let j = 0, { length: alertsLength } = alerts;
-      j < alertsLength;
-      j += 1
-    ) {
-      const alert = alerts[j]
-      if (alert.action === 'error') {
-        severity = 1
-      } else if (alert.action === 'warn' && severity > 2) {
-        severity = 2
-      } else if (alert.action === 'monitor' && severity > 3) {
-        severity = 3
-      }
-      if (!alertTypes.includes(alert.type)) {
-        alertTypes.push(alert.type)
-      }
-    }
-    if (alertTypes.length === 0) {
+    const summary = alertSummary(packageData.alerts ?? [])
+    if (summary.types.length === 0) {
       continue
     }
     const score = Math.round((packageData.score?.overall ?? 0) * 100)
+    const packageName = displayPackageName(packageData, ref.purl)
+    const topTypes = summary.types
+      .slice(0, 3)
+      .map(type => alertTitle(type))
+      .join(', ')
+    const remaining =
+      summary.types.length > 3 ? `, +${summary.types.length - 3} more` : ''
     diagnostics.push({
       range: ref.range,
-      severity,
+      severity: summary.diagnosticSeverity,
       source: 'Socket Security',
       code: ref.purl,
-      message: `Socket Security score ${score}: ${alertTypes.slice(0, 4).join(', ')}`,
+      message: `${packageName}: Socket score ${score}/100, ${summary.label} alert${summary.total === 1 ? '' : 's'} (${topTypes}${remaining})`,
       data: {
         purl: ref.purl,
       },
@@ -206,41 +194,207 @@ function hoverMarkdown(purl) {
   if (!packageData) {
     return `Socket Security for [${purl}](https://socket.dev/${purl})`
   }
-  const score = Math.round((packageData.score?.overall ?? 0) * 100)
   const link = packageLink(purl, packageData)
+  const packageName = displayPackageName(packageData, purl)
+  const score = Math.round((packageData.score?.overall ?? 0) * 100)
+  const summary = alertSummary(packageData.alerts ?? [])
   const rows = [
-    `Socket Security for [${packageData.name ?? purl}](${link})`,
+    `### [${packageName}](${link})`,
     '',
-    `Package score: ${score}`,
+    `**Socket score:** ${score}/100`,
   ]
-  const alerts = packageData.alerts ?? []
+  const metadata = packageMetadata(packageData)
+  if (metadata.length > 0) {
+    rows.push('', metadata.join(' · '))
+  }
+  rows.push('', scoreTable(packageData.score))
+  if (summary.total > 0) {
+    rows.push(
+      '',
+      `**Alerts:** ${summary.total} total · ${summary.byAction.error} error · ${summary.byAction.warn} warn · ${summary.byAction.monitor} monitor · ${summary.byAction.ignore} ignored`,
+    )
+  }
+  const alerts = sortedAlerts(packageData.alerts ?? [])
   if (alerts.length > 0) {
-    rows.push('', '| action | type | extra |', '| --- | --- | --- |')
+    rows.push('', '| status | alert | details |', '| --- | --- | --- |')
     const seen = new Set()
     for (let i = 0, { length } = alerts; i < length; i += 1) {
       const alert = alerts[i]
-      if (seen.has(alert.type)) {
+      const dedupeKey = `${alert.action}:${alert.type}`
+      if (seen.has(dedupeKey)) {
         continue
       }
-      seen.add(alert.type)
-      const extras = []
-      if (alert.props?.alternatePackage) {
-        extras.push(`Possible intent: ${alert.props.alternatePackage}`)
-      }
-      if (alert.props?.lastPublish) {
-        extras.push(
-          `Last published: ${new Date(alert.props.lastPublish).toLocaleDateString()}`,
-        )
-      }
-      if (alert.props?.note) {
-        extras.push(String(alert.props.note).replaceAll(/\r?\n/g, '<br>'))
-      }
+      seen.add(dedupeKey)
       rows.push(
-        `| ${alert.action} | ${alert.type} | ${extras.join('<br>') || ' '} |`,
+        `| ${actionLabel(alert.action)} | ${alertTitle(alert.type)} | ${alertDetails(alert, packageData)} |`,
       )
     }
   }
   return rows.join('\n')
+}
+
+function actionLabel(action) {
+  return {
+    error: 'Error',
+    ignore: 'Info',
+    monitor: 'Monitor',
+    warn: 'Warn',
+  }[action] ?? action
+}
+
+function alertDetails(alert, packageData) {
+  const details = []
+  const alternatePackage = alert.props?.alternatePackage
+  if (alternatePackage) {
+    details.push(
+      `Possible intended package: [${alternatePackage}](${alternatePackageLink(alternatePackage, packageData)})`,
+    )
+  }
+  if (alert.props?.lastPublish) {
+    details.push(`Last published ${formatDate(alert.props.lastPublish)}`)
+  }
+  if (alert.props?.note) {
+    details.push(String(alert.props.note).replaceAll(/\r?\n/g, '<br>'))
+  }
+  if (alert.severity) {
+    details.push(`Severity: ${alert.severity}`)
+  }
+  return details.length > 0 ? details.join('<br>') : alertDescription(alert.type)
+}
+
+function alertDescription(type) {
+  return {
+    envVars: 'Package accesses environment variables.',
+    fileSystem: 'Package accesses the local filesystem.',
+    installScripts: 'Package runs install-time scripts.',
+    networkAccess: 'Package makes network requests.',
+    shellAccess: 'Package can spawn shell commands.',
+    telemetry: 'Package may collect telemetry.',
+    urlStrings: 'Package contains URL strings.',
+  }[type] ?? 'See Socket package page for details.'
+}
+
+function alertSummary(alerts) {
+  const byAction = {
+    error: 0,
+    ignore: 0,
+    monitor: 0,
+    warn: 0,
+  }
+  const types = []
+  let diagnosticSeverity = 4
+  for (let i = 0, { length } = alerts; i < length; i += 1) {
+    const alert = alerts[i]
+    if (alert.action in byAction) {
+      byAction[alert.action] += 1
+    }
+    if (alert.action === 'error') {
+      diagnosticSeverity = 1
+    } else if (alert.action === 'warn' && diagnosticSeverity > 2) {
+      diagnosticSeverity = 2
+    } else if (alert.action === 'monitor' && diagnosticSeverity > 3) {
+      diagnosticSeverity = 3
+    }
+    if (!types.includes(alert.type)) {
+      types.push(alert.type)
+    }
+  }
+  const label =
+    byAction.error > 0
+      ? 'error'
+      : byAction.warn > 0
+        ? 'warning'
+        : byAction.monitor > 0
+          ? 'monitor'
+          : 'informational'
+  return {
+    byAction,
+    diagnosticSeverity,
+    label,
+    total: alerts.length,
+    types,
+  }
+}
+
+function alertTitle(type) {
+  return String(type)
+    .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
+    .replaceAll(/[-_]+/g, ' ')
+    .replace(/^./, char => char.toUpperCase())
+}
+
+function alternatePackageLink(name, packageData) {
+  const type = packageData.type === 'golang' ? 'go' : packageData.type
+  return `https://socket.dev/${type}/package/${name}`
+}
+
+function displayPackageName(packageData, purl) {
+  const namespace = packageData.namespace ? `${packageData.namespace}/` : ''
+  return packageData.name ? `${namespace}${packageData.name}` : purl
+}
+
+function formatDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+  }
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function packageMetadata(packageData) {
+  const metadata = []
+  if (packageData.type) {
+    metadata.push(`**Ecosystem:** ${packageData.type}`)
+  }
+  if (packageData.version) {
+    metadata.push(`**Version:** ${packageData.version}`)
+  }
+  if (packageData.license) {
+    metadata.push(`**License:** ${packageData.license}`)
+  }
+  return metadata
+}
+
+function scoreTable(score) {
+  if (!score) {
+    return ''
+  }
+  const rows = [
+    ['Overall', score.overall],
+    ['Supply chain', score.supplyChain],
+    ['Vulnerability', score.vulnerability],
+    ['Maintenance', score.maintenance],
+    ['Quality', score.quality],
+    ['License', score.license],
+  ].filter(([, value]) => typeof value === 'number')
+  if (rows.length === 0) {
+    return ''
+  }
+  return [
+    '| score | value |',
+    '| --- | ---: |',
+    ...rows.map(([label, value]) => `| ${label} | ${Math.round(value * 100)}/100 |`),
+  ].join('\n')
+}
+
+function sortedAlerts(alerts) {
+  const actionRank = {
+    error: 0,
+    warn: 1,
+    monitor: 2,
+    ignore: 3,
+  }
+  return [...alerts].sort((a, b) => {
+    const actionDelta = (actionRank[a.action] ?? 99) - (actionRank[b.action] ?? 99)
+    if (actionDelta !== 0) {
+      return actionDelta
+    }
+    return String(a.type).localeCompare(String(b.type))
+  })
 }
 
 function packageLink(purl, packageData) {
