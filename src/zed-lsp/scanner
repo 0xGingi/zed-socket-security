@@ -32,6 +32,12 @@ function findRefs(doc) {
   if (filename === 'go.mod') {
     return goModRefs(doc.text)
   }
+  if (filename === 'Cargo.toml') {
+    return cargoTomlRefs(doc.text)
+  }
+  if (filename === 'Cargo.lock') {
+    return cargoLockRefs(doc.text)
+  }
   if (
     doc.languageId === 'javascript' ||
     doc.languageId === 'javascriptreact' ||
@@ -45,6 +51,9 @@ function findRefs(doc) {
   }
   if (doc.languageId === 'go') {
     return goRefs(doc.text)
+  }
+  if (doc.languageId === 'rust') {
+    return rustRefs(doc.text)
   }
   return []
 }
@@ -68,6 +77,80 @@ function goRefs(text) {
     /import\s+(?:\(\s*)?["`]([^"`]+)["`]/g,
     'golang',
     name => name,
+  )
+}
+
+function cargoDependencyName(line) {
+  const trimmed = stripTomlComment(line).trim()
+  if (!trimmed || trimmed.startsWith('[')) {
+    return undefined
+  }
+  const quoted = trimmed.match(/^"([^"]+)"\s*=/)
+  if (quoted) {
+    return quoted[1]
+  }
+  const bare = trimmed.match(/^([A-Za-z0-9_-]+)\s*=/)
+  return bare?.[1]
+}
+
+function cargoLockRefs(text) {
+  const refs = []
+  const packageBlock = /^\[\[package\]\]$/gm
+  const matches = [...text.matchAll(packageBlock)]
+  for (let i = 0, { length } = matches; i < length; i += 1) {
+    const blockStart = matches[i].index + matches[i][0].length
+    const blockEnd =
+      i + 1 < matches.length ? matches[i + 1].index : text.length
+    const block = text.slice(blockStart, blockEnd)
+    const nameMatch = /^\s*name\s*=\s*"([^"]+)"/m.exec(block)
+    if (!nameMatch) {
+      continue
+    }
+    const name = nameMatch[1]
+    const start = blockStart + nameMatch.index + nameMatch[0].indexOf(name)
+    refs.push({
+      purl: simpurl('cargo', name),
+      range: rangeForOffsets(text, start, start + name.length),
+    })
+  }
+  return refs
+}
+
+function cargoTomlRefs(text) {
+  const refs = []
+  let inDependencyTable = false
+  for (const line of linesWithOffsets(text)) {
+    const section = /^\s*\[([^\]]+)\]\s*$/.exec(stripTomlComment(line.text))
+    if (section) {
+      inDependencyTable = isCargoDependencyTable(section[1])
+      continue
+    }
+    if (!inDependencyTable) {
+      continue
+    }
+    const name = cargoDependencyName(line.text)
+    if (!name) {
+      continue
+    }
+    const start = line.offset + line.text.indexOf(name)
+    refs.push({
+      purl: simpurl('cargo', name),
+      range: rangeForOffsets(text, start, start + name.length),
+    })
+  }
+  return refs
+}
+
+function isCargoDependencyTable(section) {
+  const normalized = section.trim()
+  return (
+    normalized === 'dependencies' ||
+    normalized === 'dev-dependencies' ||
+    normalized === 'build-dependencies' ||
+    normalized === 'workspace.dependencies' ||
+    normalized.endsWith('.dependencies') ||
+    normalized.endsWith('.dev-dependencies') ||
+    normalized.endsWith('.build-dependencies')
   )
 }
 
@@ -167,6 +250,28 @@ function pythonRefs(text) {
   return refs.filter(ref => !PYTHON_BUILTINS.has(purlName(ref.purl)))
 }
 
+function rustRefs(text) {
+  return regexRefs(
+    text,
+    /^\s*(?:pub\s+)?(?:use\s+([A-Za-z_][A-Za-z0-9_]*)::|extern\s+crate\s+([A-Za-z_][A-Za-z0-9_]*))/gm,
+    'cargo',
+    name => name,
+  ).filter(ref => !RUST_BUILTINS.has(purlName(ref.purl)))
+}
+
+function linesWithOffsets(text) {
+  const lines = []
+  let offset = 0
+  for (const line of text.split(/\n/)) {
+    lines.push({
+      offset,
+      text: line,
+    })
+    offset += line.length + 1
+  }
+  return lines
+}
+
 function quotedRefs(text, name, purl) {
   const refs = []
   const regex = new RegExp(`["']${escapeRegExp(name)}["']`, 'g')
@@ -215,6 +320,20 @@ function requirementsRefs(text) {
 
 function simpurl(ecosystem, name) {
   return `pkg:${ecosystem}/${name}`
+}
+
+function stripTomlComment(line) {
+  let quote
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]
+    if ((char === '"' || char === "'") && line[i - 1] !== '\\') {
+      quote = quote === char ? undefined : quote ?? char
+    }
+    if (char === '#' && !quote) {
+      return line.slice(0, i)
+    }
+  }
+  return line
 }
 
 const NODE_BUILTINS = new Set([
@@ -271,6 +390,16 @@ const PYTHON_BUILTINS = new Set([
   'sys',
   'typing',
   'unittest',
+])
+
+const RUST_BUILTINS = new Set([
+  'alloc',
+  'core',
+  'crate',
+  'proc_macro',
+  'self',
+  'std',
+  'super',
 ])
 
 module.exports = {

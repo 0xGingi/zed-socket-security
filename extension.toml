@@ -19,6 +19,7 @@ languages = [
   "JSONC",
   "Python",
   "Go",
+  "Rust",
   "TOML",
   "YAML",
 ]
@@ -29,6 +30,7 @@ languages = [
 "JSON" = "json"
 "JSONC" = "jsonc"
 "Python" = "python"
+"Rust" = "rust"
 "TOML" = "toml"
 "TSX" = "typescriptreact"
 "TypeScript" = "typescript"

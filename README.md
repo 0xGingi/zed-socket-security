@@ -6,9 +6,9 @@ This extension exposes the hosted Socket Security MCP server to Zed's Agent Pane
 
 - Registers a Socket Security context server in Zed.
 - Bridges Zed's stdio MCP extension interface to `https://mcp.socket.dev/` with `mcp-remote`.
-- Starts a Socket Security language server for JavaScript, TypeScript, TSX, Python, Go, JSON, JSONC, TOML, and YAML files.
+- Starts a Socket Security language server for JavaScript, TypeScript, TSX, Python, Go, Rust, JSON, JSONC, TOML, and YAML files.
 - Reports package alerts as LSP diagnostics and renders Socket package data in hover markdown.
-- Scans `package.json`, `requirements.txt`, `*-requirements.txt`, `pyproject.toml`, `go.mod`, and source imports for npm, PyPI, and Go package references.
+- Scans `package.json`, `requirements.txt`, `*-requirements.txt`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `Cargo.lock`, and source imports for npm, PyPI, Go, and Cargo package references.
 - Exposes a Zed Configure flow for `socket_api_token`.
 
 ## Development
@@ -61,7 +61,9 @@ After `node zed-package --install`, restart Zed and open a project containing on
 - `requirements.txt`
 - `pyproject.toml`
 - `go.mod`
-- JavaScript, TypeScript, TSX, Python, or Go source imports
+- `Cargo.toml`
+- `Cargo.lock`
+- JavaScript, TypeScript, TSX, Python, Go, or Rust source imports
 
 Hover a package name or import to see Socket package data. Packages with Socket alerts should also produce LSP diagnostics.
 

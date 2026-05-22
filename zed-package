@@ -194,13 +194,14 @@ function installExtension(manifest) {
       language_servers: {
         'socket-security-lsp': {
           language: null,
-          languages: ['JavaScript', 'TypeScript', 'TSX', 'JSON', 'JSONC', 'Python', 'Go', 'TOML', 'YAML'],
+          languages: ['JavaScript', 'TypeScript', 'TSX', 'JSON', 'JSONC', 'Python', 'Go', 'Rust', 'TOML', 'YAML'],
           language_ids: {
             Go: 'go',
             JavaScript: 'javascript',
             JSON: 'json',
             JSONC: 'jsonc',
             Python: 'python',
+            Rust: 'rust',
             TOML: 'toml',
             TSX: 'typescriptreact',
             TypeScript: 'typescript',
